@@ -1,0 +1,19 @@
+[package]
+name    = "microvecdb-core"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default  = ["allocator", "simd"]
+allocator = ["dep:lol_alloc"]
+simd      = []
+
+[dependencies]
+lol_alloc = { version = "0.4.1", optional = true }
+libm      = { version = "0.2", default-features = false }
+
+[dev-dependencies]
+# nothing extra — native std is available for tests automatically
+
+[lib]
+crate-type = ["rlib"]

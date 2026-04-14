@@ -1,0 +1,5 @@
+# wasm32 target flags.
+# SIMD is omitted here so wasm-opt can process the binary without --enable-simd.
+# The scalar Hamming loop (XOR + count_ones) is already vectorised by LLVM.
+[target.wasm32-unknown-unknown]
+rustflags = []

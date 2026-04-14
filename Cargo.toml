@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/microvecdb-core",
+    "crates/microvecdb-wasm",
+]
+
+[profile.release]
+opt-level     = "z"
+lto           = true
+codegen-units = 1
+panic         = "abort"
+strip         = true
+
+[profile.dev]
+panic = "abort"

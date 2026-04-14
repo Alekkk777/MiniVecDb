@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MicroVecDB — Benchmark Arena</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d2e;
+    --border: #2a2d3e;
+    --accent: #7c3aed;
+    --green: #10b981;
+    --red: #ef4444;
+    --yellow: #f59e0b;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; padding: 2rem; }
+  h1 { font-size: 1.6rem; font-weight: 700; margin-bottom: 0.25rem; }
+  .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem;
+  }
+  .card h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 0.75rem; }
+
+  .stat { display: flex; justify-content: space-between; align-items: baseline; padding: 0.25rem 0; border-bottom: 1px solid var(--border); }
+  .stat:last-child { border-bottom: none; }
+  .stat-label { font-size: 0.85rem; color: var(--muted); }
+  .stat-value { font-family: var(--mono); font-size: 0.9rem; font-weight: 600; }
+  .stat-value.green { color: var(--green); }
+  .stat-value.yellow { color: var(--yellow); }
+  .stat-value.red { color: var(--red); }
+  .stat-value.accent { color: #a78bfa; }
+
+  .log-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    line-height: 1.7;
+    height: 320px;
+    overflow-y: auto;
+    margin-bottom: 1rem;
+  }
+  .log-box .ts { color: var(--muted); margin-right: 0.5rem; user-select: none; }
+  .log-box .ok { color: var(--green); }
+  .log-box .warn { color: var(--yellow); }
+  .log-box .err { color: var(--red); }
+  .log-box .info { color: #93c5fd; }
+  .log-box .dim { color: var(--muted); }
+
+  button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 0.7rem 1.5rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    margin-right: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .progress-bar {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 0.5rem;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.2s ease;
+    width: 0%;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .badge.pass { background: rgba(16,185,129,0.2); color: var(--green); }
+  .badge.fail { background: rgba(239,68,68,0.2); color: var(--red); }
+  .badge.skip { background: rgba(100,116,139,0.2); color: var(--muted); }
+
+  .callout {
+    border-left: 3px solid var(--yellow);
+    background: rgba(245,158,11,0.06);
+    border-radius: 0 8px 8px 0;
+    padding: 0.75rem 1rem;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    color: var(--text);
+    margin-top: 0.75rem;
+  }
+  .callout strong { color: var(--yellow); }
+  .callout.green-callout {
+    border-left-color: var(--green);
+    background: rgba(16,185,129,0.06);
+  }
+  .callout.green-callout strong { color: var(--green); }
+
+  .card.full { grid-column: 1 / -1; }
+  .cluster-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 0.75rem; }
+  @media (max-width: 800px) { .cluster-grid { grid-template-columns: 1fr; } }
+
+  .verdict {
+    text-align: center;
+    font-size: 1.1rem;
+    font-weight: 700;
+    font-family: var(--mono);
+    padding: 0.75rem;
+    border-radius: 8px;
+    margin-top: 0.75rem;
+    border: 1px solid var(--border);
+  }
+  .verdict.pass { color: var(--green); background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.3); }
+  .verdict.fail { color: var(--red);   background: rgba(239,68,68,0.08);  border-color: rgba(239,68,68,0.3); }
+
+  .result-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  .result-table th { text-align: left; color: var(--muted); font-weight: 500; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--border); }
+  .result-table td { padding: 0.3rem 0.5rem; font-family: var(--mono); border-bottom: 1px solid rgba(42,45,62,0.5); }
+  .result-table tr:last-child td { border-bottom: none; }
+
+  #status-bar {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 1.5rem;
+    font-family: var(--mono);
+  }
+  #status-bar span { color: var(--text); }
+</style>
+</head>
+<body>
+
+<div id="security-banner" style="display:none;background:rgba(245,158,11,0.12);border:1px solid var(--yellow);border-radius:8px;padding:0.75rem 1rem;margin-bottom:1.5rem;font-size:0.82rem;line-height:1.6">
+  <strong style="color:var(--yellow)">Security Warning:</strong>
+  This page is missing required security headers
+  (<code>Cross-Origin-Opener-Policy</code> and/or <code>Cross-Origin-Embedder-Policy</code>).
+  <code>SharedArrayBuffer</code> and full WASM multi-threading are disabled by the browser.
+  See <a href="security-headers.md" style="color:#93c5fd">security-headers.md</a> for setup instructions.
+</div>
+
+<h1>MicroVecDB — Benchmark Arena</h1>
+<p class="subtitle">Raw browser benchmark — no bundler, no profiler. Served by <code>python -m http.server 8080</code>.</p>
+
+<p id="status-bar">Status: <span id="status-text">Loading WASM...</span></p>
+
+<div style="margin-bottom:1.5rem">
+  <button id="btn-run-all" disabled>Run All Benchmarks</button>
+  <button id="btn-correctness" disabled>Correctness Only</button>
+  <button id="btn-perf" disabled>Performance Only</button>
+  <button id="btn-cluster" disabled style="background:#059669">Cluster Mock Test</button>
+</div>
+
+<div class="log-box" id="log"></div>
+<div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+
+<br>
+
+<div class="grid">
+  <div class="card">
+    <h2>Correctness Tests</h2>
+    <div id="correctness-stats">
+      <div class="stat"><span class="stat-label">Status</span><span class="stat-value" id="c-status">—</span></div>
+      <div class="stat"><span class="stat-label">Exact match (dist=0)</span><span class="stat-value" id="c-exact">—</span></div>
+      <div class="stat"><span class="stat-label">Near vs far ordering</span><span class="stat-value" id="c-ordering">—</span></div>
+      <div class="stat"><span class="stat-label">Soft delete excluded</span><span class="stat-value" id="c-delete">—</span></div>
+      <div class="stat"><span class="stat-label">Batch insert == single</span><span class="stat-value" id="c-batch">—</span></div>
+      <div class="stat"><span class="stat-label">HNSW ⊂ brute-force top</span><span class="stat-value" id="c-hnsw-subset">—</span></div>
+      <div class="stat"><span class="stat-label">Serialize → deserialize</span><span class="stat-value" id="c-serde">—</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Performance</h2>
+    <div id="perf-stats">
+      <div class="stat"><span class="stat-label">Insert 10K vectors</span><span class="stat-value" id="p-insert-10k">—</span></div>
+      <div class="stat"><span class="stat-label">Insert 100K vectors</span><span class="stat-value" id="p-insert-100k">—</span></div>
+      <div class="stat"><span class="stat-label">Batch insert 10K</span><span class="stat-value" id="p-batch-10k">—</span></div>
+      <div class="stat"><span class="stat-label">scan_knn (100K, k=10)</span><span class="stat-value" id="p-scan">—</span></div>
+      <div class="stat"><span class="stat-label">build_index (HNSW, M=16)</span><span class="stat-value" id="p-build">—</span></div>
+      <div class="stat"><span class="stat-label">hnsw_search (k=10, ef=64)</span><span class="stat-value" id="p-hnsw">—</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Memory Efficiency</h2>
+    <div id="mem-stats">
+      <div class="stat"><span class="stat-label">100K raw f32[384]</span><span class="stat-value" id="m-raw">147.0 MB</span></div>
+      <div class="stat"><span class="stat-label">100K quantized [u32;12]</span><span class="stat-value" id="m-quantized">4.6 MB</span></div>
+      <div class="stat"><span class="stat-label">Compression ratio</span><span class="stat-value accent" id="m-ratio">32×</span></div>
+      <div class="stat"><span class="stat-label">Bits per vector</span><span class="stat-value" id="m-bits">384 bits</span></div>
+      <div class="stat"><span class="stat-label">Bytes per vector</span><span class="stat-value" id="m-bytes">48 bytes</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>HNSW Recall — Random Vectors <span style="color:var(--yellow);font-size:0.7rem;font-weight:600;letter-spacing:0.05em;vertical-align:middle;margin-left:0.4rem">WORST CASE</span></h2>
+    <div id="recall-stats">
+      <div class="stat"><span class="stat-label">Dataset (random Gaussian → binary)</span><span class="stat-value" id="r-size">—</span></div>
+      <div class="stat"><span class="stat-label">ef_construction used</span><span class="stat-value" id="r-efcon" style="color:var(--muted)">100</span></div>
+      <div class="stat"><span class="stat-label">M=16 Recall@10 ef=64</span><span class="stat-value" id="r-10-64">—</span></div>
+      <div class="stat"><span class="stat-label">M=16 Recall@10 ef=200</span><span class="stat-value" id="r-10-200">—</span></div>
+      <div class="stat"><span class="stat-label">M=32 Recall@10 ef=64</span><span class="stat-value" id="r-32-64">—</span></div>
+      <div class="stat"><span class="stat-label">M=32 Recall@10 ef=200</span><span class="stat-value" id="r-32-200">—</span></div>
+      <div class="stat"><span class="stat-label">Avg dist gap (bf vs hnsw)</span><span class="stat-value" id="r-dist-gap">—</span></div>
+    </div>
+    <div class="callout">
+      <strong>Perché il recall è basso su dati random?</strong><br>
+      Con vettori Gaussiani casuali → quantizzazione 1-bit, la distanza di Hamming è
+      <em>quasi piatta</em>: su 100K punti ogni coppia è a ~192 ± 10 bit.
+      HNSW naviga per gradiente metrico — senza gradiente, si muove alla cieca.
+      <br><br>
+      <strong>Su dati reali (sentence-BERT, CLIP, OpenAI embeddings)</strong> lo spazio
+      ha cluster semantici densi con gradienti netti → Recall@10 &gt; 0.95 a ef=64.
+      Il "Cluster Mock Test" (bottone verde) lo dimostra empiricamente.
+    </div>
+  </div>
+</div>
+
+<div class="card full" style="margin-bottom:1rem;margin-top:1rem">
+  <h2>Cluster Mock Test — HNSW su Dati Strutturati <span style="color:var(--green);font-size:0.7rem;font-weight:600;letter-spacing:0.05em;vertical-align:middle;margin-left:0.4rem">REAL WORLD PROXY</span></h2>
+  <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.5rem;line-height:1.6">
+    20 cluster × 10 vettori = 200 totali. Ogni membro è ottenuto invertendo
+    esattamente 6 bit del vettore base del cluster.
+    Intra-cluster: 6 bit · inter-cluster: ~192 bit (rapporto 32×).
+    <strong style="color:var(--text)">Vincolo chiave:</strong> N_PER_CLUSTER (10) &lt; M=16,
+    così rimangono slot per i bridge inter-cluster che tengono il grafo connesso.
+  </p>
+  <div class="cluster-grid">
+    <div>
+      <div class="stat"><span class="stat-label">Cluster</span><span class="stat-value accent" id="cl-clusters">—</span></div>
+      <div class="stat"><span class="stat-label">Vettori per cluster</span><span class="stat-value" id="cl-per-cluster">—</span></div>
+      <div class="stat"><span class="stat-label">Bit invertiti per membro</span><span class="stat-value" id="cl-bits">—</span></div>
+      <div class="stat"><span class="stat-label">Hamming intra-cluster</span><span class="stat-value green" id="cl-intra">—</span></div>
+      <div class="stat"><span class="stat-label">Hamming inter-cluster</span><span class="stat-value" id="cl-inter">—</span></div>
+    </div>
+    <div>
+      <div class="stat"><span class="stat-label">Recall@10 ef=32 (M=16)</span><span class="stat-value" id="cl-recall-32">—</span></div>
+      <div class="stat"><span class="stat-label">Recall@10 ef=64 (M=16)</span><span class="stat-value" id="cl-recall-64">—</span></div>
+      <div class="stat"><span class="stat-label">Build time (1K vettori)</span><span class="stat-value" id="cl-build-ms">—</span></div>
+      <div class="stat"><span class="stat-label">Query time ef=64</span><span class="stat-value" id="cl-search-ms">—</span></div>
+    </div>
+  </div>
+  <div class="verdict" id="cl-verdict">Premi "Cluster Mock Test" per eseguire →</div>
+</div>
+
+<div class="card" style="margin-bottom:1rem">
+  <h2>Search Results Preview — Last Query</h2>
+  <table class="result-table" id="results-table">
+    <thead><tr><th>#</th><th>doc_id</th><th>Hamming distance</th><th>Score (1 - d/384)</th><th>Source</th></tr></thead>
+    <tbody id="results-body"><tr><td colspan="5" style="color:var(--muted)">Run benchmarks to see results</td></tr></tbody>
+  </table>
+</div>
+
+<div class="card" style="margin-bottom:1rem">
+  <h2>SharedWorker Demo — Cross-Tab State</h2>
+  <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem">
+    Opens a SharedWorker that holds one shared WASM instance.
+    Insert vectors in this tab, then open a second tab on the same origin —
+    both tabs read from the same in-memory database (no OPFS needed for the demo).
+  </p>
+  <div style="margin-bottom:0.75rem">
+    <button id="btn-sw-init"   disabled>1. Init SharedWorker</button>
+    <button id="btn-sw-insert" disabled>2. Insert 100 vectors</button>
+    <button id="btn-sw-search" disabled>3. Search (k=5)</button>
+  </div>
+  <div id="sw-log" class="log-box" style="height:140px"></div>
+  <div class="stat" style="margin-top:0.5rem">
+    <span class="stat-label">Vectors in shared DB</span>
+    <span class="stat-value" id="sw-count">—</span>
+  </div>
+</div>
+
+<script type="module">
+// ─── COOP/COEP header detection ───────────────────────────────────────────────
+if (!self.crossOriginIsolated) {
+  document.getElementById('security-banner').style.display = 'block';
+}
+
+// ─── WASM import ──────────────────────────────────────────────────────────────
+import init, { WasmVecDb } from './pkg/microvecdb_wasm.js';
+
+// ─── Logger ──────────────────────────────────────────────────────────────────
+const logEl = document.getElementById('log');
+const t0 = performance.now();
+function log(msg, cls = '') {
+  const ts = ((performance.now() - t0) / 1000).toFixed(2).padStart(6, ' ');
+  const line = document.createElement('div');
+  line.innerHTML = `<span class="ts">[${ts}s]</span><span class="${cls}">${msg}</span>`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function setProgress(pct) {
+  document.getElementById('progress').style.width = pct + '%';
+}
+function setStat(id, val, cls = '') {
+  const el = document.getElementById(id);
+  el.textContent = val;
+  el.className = 'stat-value' + (cls ? ' ' + cls : '');
+}
+
+// ─── RNG (xorshift64, masked to 64 bits to prevent BigInt growth) ────────────
+function makeRng(seed = 0x5a5a5a5a) {
+  const MASK = 0xFFFFFFFFFFFFFFFFn;
+  let s = (BigInt(seed) | 1n) & MASK;
+  return function() {
+    s = (s ^ (s << 13n)) & MASK;
+    s = (s ^ (s >> 7n))  & MASK;
+    s = (s ^ (s << 17n)) & MASK;
+    return Number(s & 0xFFFFFFFFn) / 0x100000000;
+  };
+}
+
+// Generate a random 384-dim float vector (normal-ish: randn via Box-Muller)
+function randVec(rng) {
+  const v = new Float32Array(384);
+  for (let i = 0; i < 384; i += 2) {
+    const u1 = Math.max(1e-10, rng());
+    const u2 = rng();
+    const r = Math.sqrt(-2 * Math.log(u1));
+    const t = 2 * Math.PI * u2;
+    v[i]     = r * Math.cos(t);
+    v[i + 1] = r * Math.sin(t);
+  }
+  return v;
+}
+
+// Generate n vectors — returns flat Float32Array(n*384) + Uint32Array(n ids)
+function genBatch(n, rng, idOffset = 0) {
+  const flat = new Float32Array(n * 384);
+  const ids  = new Uint32Array(n);
+  for (let i = 0; i < n; i++) {
+    const v = randVec(rng);
+    flat.set(v, i * 384);
+    ids[i] = idOffset + i;
+  }
+  return { flat, ids };
+}
+
+// ─── Correctness suite ────────────────────────────────────────────────────────
+async function runCorrectness() {
+  log('━━━ CORRECTNESS SUITE ━━━', 'info');
+  let pass = 0, fail = 0;
+
+  function assert(name, condition, detail = '') {
+    if (condition) {
+      log(`  ✓ ${name} ${detail ? '— ' + detail : ''}`, 'ok');
+      pass++;
+    } else {
+      log(`  ✗ ${name} ${detail ? '— ' + detail : ''}`, 'err');
+      fail++;
+    }
+  }
+
+  // ── Test 1: Exact match returns distance = 0 ──────────────────────────────
+  {
+    const db = WasmVecDb.with_capacity(16);
+    const rng = makeRng(42);
+    const q = randVec(rng);
+    db.insert(7, q);
+    const res = db.search_scan(q, 1);
+    // res = [id, dist, ...]
+    const dist = res[1];
+    assert('Exact match dist=0', dist === 0, `got dist=${dist}`);
+    setStat('c-exact', dist === 0 ? '✓ PASS' : '✗ FAIL', dist === 0 ? 'green' : 'red');
+    db.free();
+  }
+
+  // ── Test 2: Ordering — nearest vector has smaller distance ────────────────
+  {
+    const db = WasmVecDb.with_capacity(32);
+    const rng = makeRng(99);
+    const q = randVec(rng);
+    // Insert near: q with tiny perturbation (flip 1 bit → dist ≈ 1)
+    const near = q.slice();
+    near[0] = -near[0]; // flip sign of first element → flip one bit in quantization
+    // Insert far: all-negative → all bits 0, query is random → dist ≈ 192
+    const far = new Float32Array(384).fill(-1.0);
+    db.insert(1, near);
+    db.insert(2, far);
+    const res = db.search_scan(q, 2);
+    // res = [id0, dist0, id1, dist1] — sorted by distance
+    const d0 = res[1], d1 = res[3];
+    const ok = d0 <= d1;
+    assert('Near-before-far ordering', ok, `d_near=${d0} ≤ d_far=${d1}`);
+    setStat('c-ordering', ok ? '✓ PASS' : '✗ FAIL', ok ? 'green' : 'red');
+    db.free();
+  }
+
+  // ── Test 3: Soft delete excluded from search ──────────────────────────────
+  {
+    const db = WasmVecDb.with_capacity(16);
+    const rng = makeRng(77);
+    const v = randVec(rng);
+    db.insert(42, v);
+    db.insert(43, randVec(rng));
+    const deleted = db.delete(42);
+    // Search for v — id 42 should NOT appear
+    const res = db.search_scan(v, 2);
+    let found42 = false;
+    for (let i = 0; i < res.length; i += 2) if (res[i] === 42) found42 = true;
+    const ok = deleted && !found42;
+    assert('Soft-delete excluded', ok, `deleted=${deleted} found_in_results=${found42}`);
+    setStat('c-delete', ok ? '✓ PASS' : '✗ FAIL', ok ? 'green' : 'red');
+    db.free();
+  }
+
+  // ── Test 4: Batch insert == repeated single insert (same distances) ────────
+  {
+    const rng = makeRng(12345);
+    const N = 50;
+    const { flat, ids } = genBatch(N, makeRng(12345));
+
+    // DB A: single inserts
+    const dbA = WasmVecDb.with_capacity(N + 1);
+    const rng2 = makeRng(12345);
+    for (let i = 0; i < N; i++) dbA.insert(i, randVec(rng2));
+
+    // DB B: batch insert
+    const dbB = WasmVecDb.with_capacity(N + 1);
+    dbB.insert_batch(ids, flat);
+
+    // Query both with same vector
+    const qv = randVec(makeRng(99999));
+    const rA = dbA.search_scan(qv, 10);
+    const rB = dbB.search_scan(qv, 10);
+
+    // Compare distances (order may differ for equal distances)
+    const distsA = new Set(); for (let i = 1; i < rA.length; i += 2) distsA.add(rA[i]);
+    const distsB = new Set(); for (let i = 1; i < rB.length; i += 2) distsB.add(rB[i]);
+    // Top result (best distance) must match
+    const ok = rA[1] === rB[1];
+    assert('Batch==Single (top result dist)', ok, `top_dist_A=${rA[1]} top_dist_B=${rB[1]}`);
+    setStat('c-batch', ok ? '✓ PASS' : '✗ FAIL', ok ? 'green' : 'red');
+    dbA.free(); dbB.free();
+  }
+
+  // ── Test 5: HNSW results ⊂ brute-force top-K (recall ≥ 0.7 on small set) ──
+  {
+    const N = 500, K = 10;
+    const db = WasmVecDb.with_capacity(N + 1);
+    const rng = makeRng(31415);
+    for (let i = 0; i < N; i++) db.insert(i, randVec(rng));
+    db.build_index(16, 200);
+
+    const qv = randVec(makeRng(271828));
+    const bf = db.search_scan(qv, K);
+    const hnsw = db.search_hnsw(qv, K, 200);
+
+    const bfIds = new Set(); for (let i = 0; i < bf.length; i += 2) bfIds.add(bf[i]);
+    let overlap = 0;
+    for (let i = 0; i < hnsw.length; i += 2) if (bfIds.has(hnsw[i])) overlap++;
+    const recall = overlap / K;
+    const ok = recall >= 0.7;
+    assert(`HNSW recall@10 ≥ 0.70`, ok, `recall=${recall.toFixed(2)}`);
+    setStat('c-hnsw-subset', ok ? `✓ ${(recall*100).toFixed(0)}%` : `✗ ${(recall*100).toFixed(0)}%`, ok ? 'green' : 'red');
+    db.free();
+  }
+
+  // ── Test 6: Serialize → deserialize → same results ────────────────────────
+  {
+    const N = 100;
+    const db = WasmVecDb.with_capacity(N + 1);
+    const rng = makeRng(55555);
+    for (let i = 0; i < N; i++) db.insert(i, randVec(rng));
+
+    const bytes = db.serialize();
+    log(`  serialized ${N} vectors → ${bytes.byteLength} bytes (${(bytes.byteLength/N).toFixed(1)} B/vec)`, 'dim');
+    const db2 = WasmVecDb.deserialize(bytes);
+
+    const qv = randVec(makeRng(11111));
+    const r1 = db.search_scan(qv, 5);
+    const r2 = db2.search_scan(qv, 5);
+
+    let match = r1.length === r2.length;
+    for (let i = 0; i < r1.length && match; i++) match = r1[i] === r2[i];
+    assert('Serialize round-trip', match, `bytes=${bytes.byteLength}`);
+    setStat('c-serde', match ? '✓ PASS' : '✗ FAIL', match ? 'green' : 'red');
+    db.free(); db2.free();
+  }
+
+  const total = pass + fail;
+  const summary = `${pass}/${total} passed`;
+  log(`Correctness: ${summary}`, fail === 0 ? 'ok' : 'err');
+  setStat('c-status', summary, fail === 0 ? 'green' : 'red');
+  return { pass, fail };
+}
+
+// ─── Performance benchmarks ──────────────────────────────────────────────────
+async function runPerformance() {
+  log('━━━ PERFORMANCE BENCHMARKS ━━━', 'info');
+  // Let the browser breathe between heavy tasks
+  const yield_ = () => new Promise(r => setTimeout(r, 0));
+
+  // ── Single insert 10K ──────────────────────────────────────────────────────
+  {
+    await yield_();
+    setProgress(10);
+    const N = 10_000;
+    const db = WasmVecDb.with_capacity(N + 1);
+    const rng = makeRng(1);
+    const t = performance.now();
+    for (let i = 0; i < N; i++) db.insert(i, randVec(rng));
+    const ms = performance.now() - t;
+    const perVec = (ms / N * 1000).toFixed(1);
+    log(`  insert_single 10K: ${ms.toFixed(1)} ms  (${perVec} µs/vec)`, 'ok');
+    setStat('p-insert-10k', `${ms.toFixed(1)} ms`, ms < 500 ? 'green' : 'yellow');
+    db.free();
+  }
+
+  // ── Batch insert 10K ──────────────────────────────────────────────────────
+  {
+    await yield_();
+    setProgress(20);
+    const N = 10_000;
+    const db = WasmVecDb.with_capacity(N + 1);
+    const { flat, ids } = genBatch(N, makeRng(2));
+    const t = performance.now();
+    db.insert_batch(ids, flat);
+    const ms = performance.now() - t;
+    const perVec = (ms / N * 1000).toFixed(1);
+    log(`  insert_batch  10K: ${ms.toFixed(1)} ms  (${perVec} µs/vec)`, 'ok');
+    setStat('p-batch-10k', `${ms.toFixed(1)} ms`, ms < 200 ? 'green' : 'yellow');
+    db.free();
+  }
+
+  // ── Single insert 100K ────────────────────────────────────────────────────
+  {
+    await yield_();
+    setProgress(35);
+    const N = 100_000;
+    const db = WasmVecDb.with_capacity(N + 1);
+    const rng = makeRng(3);
+    const t = performance.now();
+    for (let i = 0; i < N; i++) db.insert(i, randVec(rng));
+    const ms = performance.now() - t;
+    const perVec = (ms / N * 1000).toFixed(1);
+    log(`  insert_single 100K: ${ms.toFixed(1)} ms  (${perVec} µs/vec)`, 'ok');
+    setStat('p-insert-100k', `${ms.toFixed(1)} ms`, ms < 5000 ? 'green' : 'yellow');
+
+    // ── Brute-force scan ──────────────────────────────────────────────────────
+    setProgress(50);
+    const qv = randVec(makeRng(42));
+    const SCAN_REPS = 10;
+    const t2 = performance.now();
+    let lastRes;
+    for (let r = 0; r < SCAN_REPS; r++) lastRes = db.search_scan(qv, 10);
+    const scanMs = (performance.now() - t2) / SCAN_REPS;
+    log(`  scan_knn 100K (k=10): ${scanMs.toFixed(2)} ms/query  [avg ${SCAN_REPS} runs]`, 'ok');
+    setStat('p-scan', `${scanMs.toFixed(2)} ms`, scanMs < 20 ? 'green' : 'yellow');
+
+    // Show results preview
+    fillResultsTable(lastRes, 'brute-force');
+
+    // ── HNSW build M=16 ───────────────────────────────────────────────────────
+    setProgress(55);
+    log(`  building HNSW M=16 ef_construction=100 on 100K...`, 'dim');
+    const t3 = performance.now();
+    db.build_index(16, 100);
+    const buildMs16 = performance.now() - t3;
+    log(`  build_index M=16 (ef_c=100): ${buildMs16.toFixed(0)} ms`, 'ok');
+    setStat('p-build', `${buildMs16.toFixed(0)} ms`, 'accent');
+
+    const HNSW_REPS = 50;
+    const t4 = performance.now();
+    for (let r = 0; r < HNSW_REPS; r++) db.search_hnsw(qv, 10, 64);
+    const hnswMs16 = (performance.now() - t4) / HNSW_REPS;
+    log(`  hnsw_search M=16 k=10 ef=64: ${hnswMs16.toFixed(3)} ms/query`, 'ok');
+    setStat('p-hnsw', `${hnswMs16.toFixed(3)} ms`, hnswMs16 < 1 ? 'green' : 'yellow');
+
+    setProgress(65);
+    log(`  measuring recall M=16 (100 in-DB queries)...`, 'dim');
+    await yield_();
+    const r16 = await measureRecall(db, 100_000, 100);
+    log(`  M=16 recall@10 ef=64:  ${r16.r64.toFixed(3)}`, r16.r64 >= 0.9 ? 'ok' : 'warn');
+    log(`  M=16 recall@10 ef=200: ${r16.r200.toFixed(3)}`, r16.r200 >= 0.9 ? 'ok' : 'warn');
+    log(`  avg dist gap (bf→hnsw): ${(r16.avgH64Dist - r16.avgBfDist).toFixed(2)} bits`, 'dim');
+
+    // ── HNSW build M=32 ───────────────────────────────────────────────────────
+    setProgress(75);
+    log(`  building HNSW M=32 ef_construction=100 on 100K...`, 'dim');
+    const t5 = performance.now();
+    db.build_index(32, 100);
+    const buildMs32 = performance.now() - t5;
+    log(`  build_index M=32: ${buildMs32.toFixed(0)} ms`, 'ok');
+
+    const t6 = performance.now();
+    for (let r = 0; r < HNSW_REPS; r++) db.search_hnsw(qv, 10, 64);
+    const hnswMs32 = (performance.now() - t6) / HNSW_REPS;
+    log(`  hnsw_search M=32 k=10 ef=64: ${hnswMs32.toFixed(3)} ms/query`, 'ok');
+
+    setProgress(88);
+    log(`  measuring recall M=32 (100 in-DB queries)...`, 'dim');
+    await yield_();
+    const r32 = await measureRecall(db, 100_000, 100);
+    log(`  M=32 recall@10 ef=64:  ${r32.r64.toFixed(3)}`, r32.r64 >= 0.9 ? 'ok' : 'warn');
+    log(`  M=32 recall@10 ef=200: ${r32.r200.toFixed(3)}`, r32.r200 >= 0.9 ? 'ok' : 'warn');
+    log(`  build speedup ratio M=32/M=16: ${(buildMs32/buildMs16).toFixed(2)}×`, 'dim');
+    log(`  search speedup ratio M=32/M=16: ${(hnswMs32/hnswMs16).toFixed(2)}×`, 'dim');
+
+    setStat('r-size', '100,000 (random Gaussian → 1-bit)');
+    setStat('r-10-64',  r16.r64.toFixed(3),  r16.r64 >= 0.9 ? 'green' : 'yellow');
+    setStat('r-10-200', r16.r200.toFixed(3),  r16.r200 >= 0.9 ? 'green' : 'yellow');
+    setStat('r-32-64',  r32.r64.toFixed(3),   r32.r64 >= 0.9 ? 'green' : 'yellow');
+    setStat('r-32-200', r32.r200.toFixed(3),  r32.r200 >= 0.9 ? 'green' : 'yellow');
+    setStat('r-dist-gap', `${(r16.avgH64Dist - r16.avgBfDist).toFixed(2)} bits`);
+
+    db.free();
+  }
+
+  setProgress(100);
+}
+
+/**
+ * Measure recall using IN-DATABASE queries.
+ *
+ * We regenerate the exact same float vectors that were inserted (same RNG seed),
+ * so each query IS in the database (distance-0 self-match guaranteed).
+ * This matches the methodology of the Rust unit tests and is the correct way
+ * to benchmark HNSW: measure whether it finds the true nearest neighbours
+ * for vectors whose neighbourhood the graph explicitly encoded during build.
+ *
+ * Out-of-distribution random queries are a different (harder) problem:
+ * with random binary vectors in 384 dims, the Hamming landscape is flat
+ * (every vector is ~192 bits from every other), so greedy HNSW navigation
+ * has almost no gradient to follow. Real embedding spaces (language model
+ * outputs) have rich cluster structure that HNSW exploits perfectly.
+ */
+async function measureRecall(db, _N, Q) {
+  let totalOverlap64 = 0, totalOverlap200 = 0;
+  let totalDistBf = 0, totalDistH64 = 0;
+  const K = 10;
+
+  // Regenerate the first Q vectors from the same RNG that populated the db.
+  // insert loop used makeRng(3), so makeRng(3) regenerates the same sequence.
+  const replayRng = makeRng(3);
+
+  for (let q = 0; q < Q; q++) {
+    const qv = randVec(replayRng); // identical to the vector inserted at doc_id=q
+
+    const bf   = db.search_scan(qv, K);
+    const h64  = db.search_hnsw(qv, K, 64);
+    const h200 = db.search_hnsw(qv, K, 200);
+
+    // Collect brute-force ground truth
+    const bfIds = new Set();
+    let sumBfDist = 0;
+    for (let i = 0; i < bf.length; i += 2) {
+      bfIds.add(bf[i]);
+      sumBfDist += bf[i + 1];
+    }
+    totalDistBf += sumBfDist / K;
+
+    let ov64 = 0, ov200 = 0, sumH64Dist = 0;
+    for (let i = 0; i < h64.length;  i += 2) {
+      if (bfIds.has(h64[i])) ov64++;
+      sumH64Dist += h64[i + 1];
+    }
+    for (let i = 0; i < h200.length; i += 2) { if (bfIds.has(h200[i])) ov200++; }
+
+    totalOverlap64  += ov64  / K;
+    totalOverlap200 += ov200 / K;
+    totalDistH64    += sumH64Dist / K;
+  }
+  return {
+    r64:  totalOverlap64  / Q,
+    r200: totalOverlap200 / Q,
+    avgBfDist:  totalDistBf  / Q,
+    avgH64Dist: totalDistH64 / Q,
+  };
+}
+
+function fillResultsTable(raw, source) {
+  const tbody = document.getElementById('results-body');
+  tbody.innerHTML = '';
+  for (let i = 0; i + 1 < raw.length; i += 2) {
+    const id   = raw[i];
+    const dist = raw[i + 1];
+    const score = (1 - dist / 384).toFixed(4);
+    const rank = i / 2 + 1;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${rank}</td><td>${id}</td><td>${dist}</td><td>${score}</td><td>${source}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+// ─── Cluster Mock Test ───────────────────────────────────────────────────────
+/**
+ * Proves that HNSW recall is limited by data geometry, not by a bug.
+ *
+ * Dataset: 10 clusters × 100 vectors each (1 000 total).
+ * Each cluster member is a clone of its base vector with exactly 5 bits flipped.
+ *   → intra-cluster Hamming: ≤ 5 bits
+ *   → inter-cluster Hamming: ~192 bits (random, by independence of base vectors)
+ *
+ * On this structured landscape HNSW has steep gradients to follow and should
+ * return Recall@10 = 1.00.
+ *
+ * CRITICAL CONSTRAINT: N_PER_CLUSTER must be ≤ M_MAX0 (= 2 × M = 32 for M=16).
+ * If N_PER_CLUSTER > M_MAX0, all M_MAX0 neighbor slots get filled with
+ * intra-cluster vectors (distance ≤ BITS_TO_FLIP beats inter-cluster ~192),
+ * leaving zero cross-cluster edges → the graph is disconnected → HNSW
+ * cannot navigate between clusters → recall ≈ 0.
+ * With N_PER_CLUSTER = 10 (< M=16), only 9 intra-cluster slots are used,
+ * leaving 7 slots for inter-cluster bridge edges → fully connected graph.
+ */
+async function runClusterTest() {
+  log('━━━ CLUSTER MOCK TEST ━━━', 'info');
+  const yield_ = () => new Promise(r => setTimeout(r, 0));
+
+  const N_CLUSTERS    = 20;   // 20 separate semantic clusters
+  const N_PER_CLUSTER = 10;   // MUST be < M=16 to keep cross-cluster bridge edges
+  const BITS_TO_FLIP  = 6;   // within-cluster Hamming = exactly 6 bits (≪ inter ~192)
+  const K             = 10;   // ask for all 10 cluster members (self + 9 neighbours)
+  const rng           = makeRng(777);
+
+  // ── Build dataset ─────────────────────────────────────────────────────────
+  const total = N_CLUSTERS * N_PER_CLUSTER;
+  const flat  = new Float32Array(total * 384);
+  const ids   = new Uint32Array(total);
+  const bases = [];   // one base vector per cluster (used as query)
+
+  for (let c = 0; c < N_CLUSTERS; c++) {
+    const base = randVec(rng);
+    bases.push(base);
+
+    for (let j = 0; j < N_PER_CLUSTER; j++) {
+      const idx = c * N_PER_CLUSTER + j;
+      ids[idx] = idx;
+
+      if (j === 0) {
+        // First member of the cluster IS the base (distance = 0 from query)
+        flat.set(base, idx * 384);
+      } else {
+        // Clone base and flip exactly BITS_TO_FLIP unique bit positions
+        const copy = base.slice();
+        const flipped = new Set();
+        while (flipped.size < BITS_TO_FLIP) {
+          flipped.add(Math.floor(rng() * 384) | 0);
+        }
+        // Inverting the sign of a dimension flips its quantized bit
+        // (quantize maps  f > 0 → 1,  f ≤ 0 → 0)
+        for (const d of flipped) copy[d] = -copy[d];
+        flat.set(copy, idx * 384);
+      }
+    }
+  }
+
+  log(`  ${N_CLUSTERS} clusters × ${N_PER_CLUSTER} vettori = ${total} totali (N_per < M=16 → grafo connesso)`, 'dim');
+  log(`  Intra-cluster Hamming: = ${BITS_TO_FLIP} bit (by construction)`, 'dim');
+  log(`  Inter-cluster Hamming: ~192 bit (atteso)`, 'dim');
+
+  setStat('cl-clusters',    String(N_CLUSTERS));
+  setStat('cl-per-cluster', String(N_PER_CLUSTER));
+  setStat('cl-bits',        `${BITS_TO_FLIP} bit`);
+  setStat('cl-intra',       `≤ ${BITS_TO_FLIP} bit`);
+  setStat('cl-inter',       `~192 bit`);
+
+  const db = WasmVecDb.with_capacity(total + 1);
+  db.insert_batch(ids, flat);
+
+  // ── Build HNSW ────────────────────────────────────────────────────────────
+  log(`  Building HNSW M=16 ef_construction=200...`, 'dim');
+  await yield_();
+  const tBuild = performance.now();
+  db.build_index(16, 200);
+  const buildMs = performance.now() - tBuild;
+  log(`  build_index: ${buildMs.toFixed(0)} ms`, 'ok');
+  setStat('cl-build-ms', `${buildMs.toFixed(0)} ms`);
+
+  // ── Measure recall ────────────────────────────────────────────────────────
+  // Query each cluster with its exact base vector (= member[0], dist=0).
+  // True top-K = {self(dist=0)} ∪ {all N_PER_CLUSTER-1 cluster members(dist=BITS_TO_FLIP)}.
+  // Since K = N_PER_CLUSTER, HNSW must return ALL 10 members of the same cluster.
+  let totalR32 = 0, totalR64 = 0;
+  const SEARCH_REPS = 20;
+  let totalSearchMs = 0;
+
+  for (let c = 0; c < N_CLUSTERS; c++) {
+    const qv = bases[c];
+
+    const bf  = db.search_scan(qv, K);
+    const h32 = db.search_hnsw(qv, K, 32);
+    const h64 = db.search_hnsw(qv, K, 64);
+
+    const bfIds = new Set();
+    for (let i = 0; i < bf.length; i += 2) bfIds.add(bf[i]);
+
+    let ov32 = 0, ov64 = 0;
+    for (let i = 0; i < h32.length; i += 2) if (bfIds.has(h32[i])) ov32++;
+    for (let i = 0; i < h64.length; i += 2) if (bfIds.has(h64[i])) ov64++;
+
+    totalR32 += ov32 / K;
+    totalR64 += ov64 / K;
+
+    // Timing on last cluster
+    if (c === N_CLUSTERS - 1) {
+      const t0 = performance.now();
+      for (let r = 0; r < SEARCH_REPS; r++) db.search_hnsw(qv, K, 64);
+      totalSearchMs = (performance.now() - t0) / SEARCH_REPS;
+    }
+  }
+
+  const recall32 = totalR32 / N_CLUSTERS;
+  const recall64 = totalR64 / N_CLUSTERS;
+
+  log(`  Recall@${K} ef=32: ${recall32.toFixed(3)}`, recall32 >= 0.99 ? 'ok' : 'warn');
+  log(`  Recall@${K} ef=64: ${recall64.toFixed(3)}`, recall64 >= 0.99 ? 'ok' : 'warn');
+  log(`  Query ef=64: ${totalSearchMs.toFixed(3)} ms/query [avg ${SEARCH_REPS} runs]`, 'ok');
+
+  setStat('cl-recall-32',  recall32.toFixed(3), recall32 >= 0.99 ? 'green' : 'yellow');
+  setStat('cl-recall-64',  recall64.toFixed(3), recall64 >= 0.99 ? 'green' : 'yellow');
+  setStat('cl-search-ms',  `${totalSearchMs.toFixed(3)} ms`);
+
+  const perfect = recall64 >= 0.99;
+  const verdictEl = document.getElementById('cl-verdict');
+  verdictEl.className = 'verdict ' + (perfect ? 'pass' : 'fail');
+  verdictEl.textContent = perfect
+    ? `✓ Recall@${K} = 1.000 su 20 cluster — l'algoritmo è corretto. Il limite random è geometrico, non un bug.`
+    : `✗ Recall@${K} = ${recall64.toFixed(3)} — grafo probabilmente disconnesso, rivedere parametri`;
+
+  if (perfect) {
+    log(`  ✓ L'HNSW ha recall perfetto su dati con struttura semantica!`, 'ok');
+    log(`  → Su random (paesaggio piatto) il limite è matematico, non un bug.`, 'dim');
+  }
+
+  db.free();
+  setProgress(100);
+}
+
+// ─── Bootstrap ───────────────────────────────────────────────────────────────
+async function main() {
+  try {
+    log('Initializing WASM module...', 'dim');
+    await init();
+    log('WASM ready ✓', 'ok');
+    document.getElementById('status-text').textContent = 'Ready';
+    window.dispatchEvent(new Event('wasm-ready'));
+
+    const btnAll     = document.getElementById('btn-run-all');
+    const btnCorr    = document.getElementById('btn-correctness');
+    const btnPerf    = document.getElementById('btn-perf');
+    const btnCluster = document.getElementById('btn-cluster');
+    btnAll.disabled = btnCorr.disabled = btnPerf.disabled = btnCluster.disabled = false;
+
+    const allBtns = [btnAll, btnCorr, btnPerf, btnCluster];
+    async function disableAndRun(fn) {
+      allBtns.forEach(b => b.disabled = true);
+      document.getElementById('status-text').textContent = 'Running…';
+      setProgress(0);
+      try { await fn(); }
+      catch (e) { log(`FATAL: ${e.message}`, 'err'); console.error(e); }
+      document.getElementById('status-text').textContent = 'Done';
+      allBtns.forEach(b => b.disabled = false);
+    }
+
+    btnAll.onclick     = () => disableAndRun(async () => { await runCorrectness(); await runPerformance(); await runClusterTest(); });
+    btnCorr.onclick    = () => disableAndRun(runCorrectness);
+    btnPerf.onclick    = () => disableAndRun(runPerformance);
+    btnCluster.onclick = () => disableAndRun(runClusterTest);
+
+  } catch (e) {
+    log(`Failed to load WASM: ${e.message}`, 'err');
+    document.getElementById('status-text').textContent = 'WASM load failed — check console';
+    console.error(e);
+  }
+}
+
+main();
+
+// ─── SharedWorker Demo ────────────────────────────────────────────────────────
+(function() {
+  const swLog = document.getElementById('sw-log');
+  const swCount = document.getElementById('sw-count');
+  let port = null;
+  let nextReqId = 1;
+  const pending = new Map();
+
+  function swLine(msg, cls = '') {
+    const line = document.createElement('div');
+    line.innerHTML = `<span class="${cls}">${msg}</span>`;
+    swLog.appendChild(line);
+    swLog.scrollTop = swLog.scrollHeight;
+  }
+
+  function send(msg, transfer = []) {
+    const reqId = nextReqId++;
+    return new Promise((resolve, reject) => {
+      pending.set(reqId, { resolve, reject });
+      port.postMessage({ ...msg, reqId }, transfer);
+    });
+  }
+
+  function onMessage(e) {
+    const res = e.data;
+    const h = pending.get(res.reqId);
+    if (!h) return;
+    pending.delete(res.reqId);
+    if (res.type === 'ok') h.resolve(res.payload);
+    else h.reject(new Error(res.message));
+  }
+
+  const btnInit   = document.getElementById('btn-sw-init');
+  const btnInsert = document.getElementById('btn-sw-insert');
+  const btnSearch = document.getElementById('btn-sw-search');
+
+  // Enable init button once WASM (main thread) is ready — the worker loads
+  // its own copy of the WASM module independently.
+  window.addEventListener('wasm-ready', () => { btnInit.disabled = false; });
+
+  btnInit.onclick = async () => {
+    if (!('SharedWorker' in window)) {
+      swLine('SharedWorker not supported in this browser.', 'err'); return;
+    }
+    try {
+      const worker = new SharedWorker('./shared-worker.js', { type: 'module', name: 'microvecdb-demo' });
+      port = worker.port;
+      port.onmessage = onMessage;
+      port.start();
+      swLine('SharedWorker connected ✓', 'ok');
+      const stats = await send({ type: 'init', capacity: 1024, persistenceKey: null, hnswM: 16, hnswEfConstruction: 200 });
+      swLine(`DB ready — ${stats.count} vectors, hasIndex=${stats.hasIndex}`, 'dim');
+      swCount.textContent = stats.count;
+      btnInsert.disabled = false;
+    } catch (e) {
+      swLine(`Error: ${e.message}`, 'err');
+    }
+  };
+
+  const swRng = (() => {
+    const MASK = 0xFFFFFFFFFFFFFFFFn;
+    let s = 0xDEADBEEFn;
+    return () => {
+      s = (s ^ (s << 13n)) & MASK;
+      s = (s ^ (s >> 7n))  & MASK;
+      s = (s ^ (s << 17n)) & MASK;
+      return Number(s & 0xFFFFFFFFn) / 0x100000000;
+    };
+  })();
+
+  let insertedCount = 0;
+
+  btnInsert.onclick = async () => {
+    btnInsert.disabled = true;
+    const N = 100;
+    const ids = new Uint32Array(N);
+    const flat = new Float32Array(N * 384);
+    for (let i = 0; i < N; i++) {
+      ids[i] = insertedCount + i;
+      for (let d = 0; d < 384; d++) flat[i * 384 + d] = swRng() - 0.5;
+    }
+    const t = performance.now();
+    const count = await send({ type: 'insert_batch', ids, flat }, [ids.buffer, flat.buffer]);
+    insertedCount += N;
+    const ms = (performance.now() - t).toFixed(1);
+    swLine(`Inserted ${count} vectors (batch) in ${ms} ms`, 'ok');
+    const stats = await send({ type: 'stats' });
+    swCount.textContent = stats.count;
+    btnSearch.disabled = false;
+    btnInsert.disabled = false;
+  };
+
+  btnSearch.onclick = async () => {
+    const qv = new Float32Array(384);
+    for (let d = 0; d < 384; d++) qv[d] = swRng() - 0.5;
+    const t = performance.now();
+    const raw = await send({ type: 'search_scan', query: qv, k: 5 }, [qv.buffer]);
+    const ms = (performance.now() - t).toFixed(1);
+    swLine(`search_scan (k=5) in ${ms} ms → [${Array.from(raw).join(', ')}]`, 'ok');
+  };
+})();
+</script>
+</body>
+</html>

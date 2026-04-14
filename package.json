@@ -1,0 +1,12 @@
+{
+  "name": "microvecdb-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "build:core": "npm run build --workspace=packages/core",
+    "test": "npm test --workspaces --if-present"
+  }
+}
