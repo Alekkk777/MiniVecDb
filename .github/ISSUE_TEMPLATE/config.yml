@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Ask a question
+    url: https://github.com/Alekkk777/MiniVecDb/discussions
+    about: For questions, ideas, and general discussion — use Discussions, not Issues.
+  - name: 📦 npm package
+    url: https://www.npmjs.com/package/@microvecdb/core
+    about: View the published package on npm.

@@ -1,0 +1,50 @@
+name: Feature Request
+description: Propose a new feature or API change.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening a feature request, please check if a
+        [Discussion](https://github.com/Alekkk777/MiniVecDb/discussions) already exists for your idea.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the use case. What can't you do today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would the API / behaviour look like?
+      render: typescript
+      placeholder: |
+        // Example of what you'd like to write:
+        const results = db.search(queryVec, {
+          limit: 5,
+          filter: (id) => id > 100,  // ← new option
+        });
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Other approaches you thought of and why you rejected them.
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Would this be a breaking change?
+      options:
+        - "No — purely additive"
+        - "Yes — changes existing behaviour"
+        - "Not sure"
+    validations:
+      required: true

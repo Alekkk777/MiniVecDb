@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── TypeScript types + unit tests ────────────────────────────────────────
+  test:
+    name: Test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check (packages/core)
+        run: npm run typecheck --workspace=packages/core
+
+      - name: Run tests
+        run: npm test --workspaces --if-present
+
+  # ── Rust + WASM build ────────────────────────────────────────────────────
+  build-wasm:
+    name: Build WASM
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build WASM
+        run: wasm-pack build crates/microvecdb-wasm --target web --out-dir pkg
+
+      - name: Build TypeScript wrapper
+        run: |
+          npm ci
+          npm run build:ts --workspace=packages/core
+
+      - name: Verify dist/ artefacts exist
+        run: |
+          test -f packages/core/dist/index.js
+          test -f packages/core/dist/index.d.ts
+          test -f packages/core/dist/worker.js
+          echo "✅ All expected artefacts present"
+
+  # ── Lint examples (no errors, no unused vars) ────────────────────────────
+  lint-examples:
+    name: Lint examples
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check pdf-brain
+        working-directory: examples/pdf-brain
+        run: npx tsc --noEmit
+
+      - name: Type-check visual-search
+        working-directory: examples/visual-search
+        run: npx tsc --noEmit
