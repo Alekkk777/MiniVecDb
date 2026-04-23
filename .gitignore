@@ -38,3 +38,27 @@ Thumbs.db
 
 # npm pack output
 *.tgz
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+.env/
+
+# Maturin / PyO3 build artifacts
+target/wheels/
+crates/microvecdb-python/target/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# mypy / pyright
+.mypy_cache/
+.pyright/

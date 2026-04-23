@@ -696,7 +696,7 @@ mod tests {
                 rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
                 if rng & 1 == 0 { 1.0_f32 } else { -1.0_f32 }
             }).collect();
-            store.insert(i, quantize_f32(&floats).unwrap()).unwrap();
+            store.insert(i, quantize_f32(&floats).unwrap(), 0.0).unwrap();
         }
         store
     }
@@ -712,7 +712,7 @@ mod tests {
     fn single_node_exact_match() {
         let mut store = VectorStore::new();
         let v = quantize_f32(&[1.0_f32; 384]).unwrap();
-        store.insert(42, v).unwrap();
+        store.insert(42, v, 0.0).unwrap();
         let mut idx = HnswIndex::new(DEFAULT_M, DEFAULT_EF_CONSTRUCTION);
         idx.insert_node(&store, 0).unwrap();
         let r = idx.search(&store, &v, 1, 10);

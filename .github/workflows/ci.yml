@@ -65,6 +65,8 @@ jobs:
           test -f packages/core/dist/index.js
           test -f packages/core/dist/index.d.ts
           test -f packages/core/dist/worker.js
+          test -f packages/core/dist/vercel.js
+          test -f packages/core/dist/vercel.d.ts
           echo "✅ All expected artefacts present"
 
   # ── Lint examples (no errors, no unused vars) ────────────────────────────

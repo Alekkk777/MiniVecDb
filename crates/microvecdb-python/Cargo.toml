@@ -1,0 +1,15 @@
+[package]
+name    = "microvecdb-python"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+name      = "minivecdb"
+crate-type = ["cdylib"]
+
+[dependencies]
+microvecdb-core = { path = "../microvecdb-core", default-features = false }
+pyo3 = { version = "0.22", features = ["extension-module"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(PyPy)'] }

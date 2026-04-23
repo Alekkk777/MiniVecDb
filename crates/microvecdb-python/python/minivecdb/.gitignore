@@ -1,0 +1,3 @@
+# compiled native extension — rebuilt by maturin, never committed
+*.so
+*.pyd

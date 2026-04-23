@@ -1,8 +1,17 @@
 {
   "name": "@microvecdb/core",
-  "version": "0.1.0",
-  "description": "Ultra-fast, 50KB browser vector database powered by Rust + WebAssembly. 96% RAM reduction via 1-bit quantization, HNSW indexing, OPFS persistence.",
+  "version": "1.0.0",
+  "description": "Ultra-fast, 50KB vector database powered by Rust + WebAssembly. TTL-aware ephemeral memory for AI agents, 1-bit quantization, HNSW indexing, OPFS persistence.",
   "type": "module",
+  "author": "Alessandro Saladino",
+  "homepage": "https://github.com/Alekkk777/MiniVecDb#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Alekkk777/MiniVecDb.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Alekkk777/MiniVecDb/issues"
+  },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -15,12 +24,20 @@
     "./worker": {
       "import": "./dist/worker.js",
       "types": "./dist/worker.d.ts"
+    },
+    "./vercel": {
+      "import": "./dist/vercel.js",
+      "require": "./dist/vercel.cjs",
+      "types": "./dist/vercel.d.ts"
     }
   },
-  "files": ["dist", "../../pkg"],
+  "files": [
+    "dist",
+    "../../pkg"
+  ],
   "scripts": {
-    "build:wasm": "cd ../.. && wasm-pack build crates/microvecdb-wasm --target web --out-dir pkg",
-    "build:ts": "tsup src/index.ts src/worker.ts --format esm,cjs --dts --clean",
+    "build:wasm": "wasm-pack build ../../crates/microvecdb-wasm --target web --out-dir ../../pkg",
+    "build:ts": "tsup src/index.ts src/worker.ts src/vercel.ts --format esm,cjs --dts --clean",
     "build": "npm run build:wasm && npm run build:ts",
     "generate-sri": "node scripts/generate-sri.mjs",
     "build:full": "npm run build && npm run generate-sri",
@@ -29,11 +46,39 @@
     "typecheck": "tsc --noEmit",
     "release": "npm run build:full && npm publish --access public"
   },
-  "keywords": ["vector-database", "wasm", "webassembly", "rust", "hnsw", "embeddings", "rag", "local-first"],
+  "keywords": [
+    "vector-database",
+    "wasm",
+    "webassembly",
+    "rust",
+    "hnsw",
+    "embeddings",
+    "rag",
+    "local-first"
+  ],
   "license": "MIT",
+  "peerDependencies": {
+    "@langchain/core": ">=0.2.0",
+    "ai": ">=4.0.0",
+    "zod": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@langchain/core": {
+      "optional": true
+    },
+    "ai": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
+  },
   "devDependencies": {
-    "typescript": "^5.4.0",
+    "@langchain/core": "^0.3.0",
+    "ai": "^6.0.168",
     "tsup": "^8.0.0",
-    "vitest": "^1.6.0"
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0",
+    "zod": "^3.25.76"
   }
 }

@@ -30,6 +30,12 @@ export type WasmVecDbInstance = {
   build_index(m: number, ef_construction: number): void;
   delete(doc_id: number): boolean;
   compact(): number;
+  /**
+   * Tombstone every active vector whose age exceeds `ttl_ms` milliseconds.
+   * Uses `Date.now()` internally. Returns the count of newly tombstoned nodes.
+   * Added in Phase 1 (TTL/GC support). Requires a WASM rebuild after Phase 1.
+   */
+  run_gc(ttl_ms: number): number;
   serialize(): Uint8Array;
   raw_vecs_ptr(): number;
   raw_vecs_len(): number;

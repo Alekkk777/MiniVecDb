@@ -1,11 +1,10 @@
 use wasm_bindgen::prelude::*;
-use js_sys::{Float32Array, Uint32Array, Uint8Array};
+use js_sys::{Date, Float32Array, Uint32Array, Uint8Array};
 
 use microvecdb_core::{
     hnsw::{HnswIndex, SearchResult},
     quantize::{quantize_f32, DIMS},
     storage::VectorStore,
-    DbError,
 };
 
 /// The main WASM-exposed database handle.
@@ -45,6 +44,11 @@ impl WasmVecDb {
     ///
     /// `vector` must be a `Float32Array` of exactly 384 elements.
     /// Returns the internal slot index, or `u32::MAX` on error.
+    ///
+    /// When the store is at pre-allocated capacity the engine recycles the
+    /// first tombstone slot rather than reallocating (preserving zero-copy
+    /// SharedArrayBuffer stability).  If a tombstone is reused, the HNSW
+    /// index is invalidated and must be rebuilt before `search_hnsw`.
     pub fn insert(&mut self, doc_id: u32, vector: &Float32Array) -> u32 {
         if vector.length() != DIMS as u32 {
             return u32::MAX;
@@ -54,8 +58,17 @@ impl WasmVecDb {
             Ok(v) => v,
             Err(_) => return u32::MAX,
         };
-        match self.store.insert(doc_id, bv) {
-            Ok(slot) => slot,
+        let before_len = self.store.len();
+        let now = Date::now();
+        match self.store.insert(doc_id, bv, now) {
+            Ok(slot) => {
+                if self.store.len() == before_len {
+                    // A tombstone was reused; slot indices in the HNSW graph
+                    // now point to stale or new data — must rebuild.
+                    self.index = None;
+                }
+                slot
+            }
             Err(_) => u32::MAX,
         }
     }
@@ -72,18 +85,42 @@ impl WasmVecDb {
         }
         let ids = doc_ids.to_vec();
         let all_floats = vectors_flat.to_vec();
+        let now = Date::now(); // single timestamp for the whole batch
         let mut count = 0u32;
+        let mut any_reuse = false;
         for i in 0..n {
             let chunk = &all_floats[i * DIMS..(i + 1) * DIMS];
             let bv = match quantize_f32(chunk) {
                 Ok(v) => v,
                 Err(_) => continue,
             };
-            if self.store.insert(ids[i], bv).is_ok() {
+            let before_len = self.store.len();
+            if self.store.insert(ids[i], bv, now).is_ok() {
                 count += 1;
+                if self.store.len() == before_len {
+                    any_reuse = true;
+                }
             }
         }
+        if any_reuse {
+            self.index = None;
+        }
         count
+    }
+
+    // ----- TTL / GC -------------------------------------------------------
+
+    /// Tombstone every active vector whose age exceeds `ttl_ms` milliseconds.
+    ///
+    /// Uses `Date.now()` internally — no timestamp argument needed from JS.
+    /// Returns the number of nodes that were tombstoned.
+    ///
+    /// Tombstoned nodes are immediately excluded from all subsequent scans and
+    /// HNSW searches without requiring a rebuild.  Their slots are recycled
+    /// automatically on the next `insert` when the store is at capacity.
+    pub fn run_gc(&mut self, ttl_ms: f64) -> u32 {
+        let now = Date::now();
+        self.store.run_gc(now, ttl_ms) as u32
     }
 
     // ----- Search ---------------------------------------------------------
@@ -136,17 +173,16 @@ impl WasmVecDb {
     ///
     /// Returns `true` if the vector was found and marked deleted.
     pub fn delete(&mut self, doc_id: u32) -> bool {
-        let deleted = self.store.delete(doc_id);
-        deleted
+        self.store.delete(doc_id)
     }
 
-    /// Remove all soft-deleted slots and compact the arrays.
+    /// Remove all tombstone slots and compact the arrays.
     ///
     /// **Warning**: slot indices change. The HNSW index is cleared and must
     /// be rebuilt after compaction.
     pub fn compact(&mut self) -> u32 {
         let freed = self.store.compact();
-        self.index = None; // index is now invalid
+        self.index = None;
         freed as u32
     }
 
@@ -157,7 +193,6 @@ impl WasmVecDb {
     /// The result can be stored via OPFS and later passed to [`deserialize`].
     pub fn serialize(&self) -> Uint8Array {
         let mut buf = Vec::new();
-        // Header byte: 0x00 = no index, 0x01 = has index
         let has_index = self.index.is_some() as u8;
         buf.push(has_index);
 
@@ -228,7 +263,7 @@ impl WasmVecDb {
 
     // ----- Stats ----------------------------------------------------------
 
-    /// Number of slots (including soft-deleted ones).
+    /// Number of slots (including tombstones).
     pub fn len(&self) -> u32 { self.store.len() as u32 }
 
     /// `true` if the store is empty.

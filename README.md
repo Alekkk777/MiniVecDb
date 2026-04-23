@@ -1,70 +1,201 @@
 # MicroVecDB
 
-**50 KB · 0 runtime dependencies · 32× less RAM than pgvector · runs entirely in the browser**
+**50 KB · 0 server · 32× less RAM · TTL-aware ephemeral memory for AI agents**
 
-A vector database compiled from Rust to WebAssembly. It stores embeddings with 1-bit quantisation, indexes them with HNSW, and searches in microseconds — all inside the browser tab, with no server, no Python, and no data leaving the user's device.
+A vector database compiled from Rust to WebAssembly (browser / Node.js / Edge) and a native Python extension (PyO3). It stores embeddings with 1-bit quantisation, indexes them with HNSW, and searches in microseconds — with built-in TTL garbage collection so your agent's memory never goes stale.
 
-```
-npm install @microvecdb/core
+```bash
+npm install @microvecdb/core        # TypeScript / browser / Node.js / Edge
+pip install minivecdb               # Python (native Rust extension)
 ```
 
 ---
 
-## The problem with every other vector DB
+## The problem with agent memory
 
-| Tool | Where it runs | RAM / vector | Network round-trip |
-|---|---|---|---|
-| pgvector | Postgres server | 1,536 B (f32×384) | yes |
-| Pinecone | Cloud | — | yes |
-| Qdrant | Docker | ~1,600 B | yes |
-| Chroma | Python process | ~1,600 B | yes |
-| **MicroVecDB** | **Browser tab** | **48 B** | **never** |
+Every LLM framework offers "memory". Almost none of them expire it.
 
-Server-based databases are the right choice for multi-user production systems. But for single-user apps (note tools, document readers, local RAG, image galleries) they introduce unnecessary latency, infrastructure cost, and a privacy problem: the user's data travels to your server.
+An agent that observes "the user is on step 2" at turn 3 should not still be acting on that observation at turn 50. But most vector stores are append-only: observations accumulate, similarity search scores degrade, and the agent confuses past context with present state.
 
-MicroVecDB eliminates all three.
+MicroVecDB treats this as a first-class concern. Every stored text has a TTL. A background GC thread (Python) or `setInterval` (JS) tombstones expired vectors automatically. You set `ttl_minutes=10`; the memory cleans itself up.
+
+---
+
+## When to use MicroVecDB vs. a server database
+
+| Use case | Right tool |
+|---|---|
+| LLM agent scratchpad (ephemeral, single-request) | **MicroVecDB** |
+| Browser app — user data must not leave the device | **MicroVecDB** |
+| Offline / PWA — works without network | **MicroVecDB** |
+| Edge function — no persistent infra | **MicroVecDB** |
+| Multi-user production system, durable | pgvector / Pinecone / Qdrant |
 
 ---
 
 ## Benchmarks
 
-These numbers are from the included example apps running on a 2023 MacBook Pro (M2), Safari 17.
+Measured on a 2023 MacBook Pro M2.
 
 | Metric | Result | Notes |
 |---|---|---|
-| **Search latency** (10k vectors) | **0.08 ms** | HNSW, ef=64 |
-| **Search latency** (50k vectors) | **0.31 ms** | HNSW, ef=64 |
-| **Batch insert** | **0.5 µs / vector** | bulk WASM call |
-| **Index build** (10k vectors) | **~180 ms** | M=16, ef_construction=200 |
-| **RAM per vector** (384-dim) | **48 B** | vs 1,536 B for f32 |
-| **RAM — 1M vectors** | **48 MB** | vs 1.5 GB for f32 |
-| **Recall@5** (semantic, real embeddings) | **100%** | all-MiniLM-L6-v2, 20-doc corpus |
-| **Recall@5** (visual, pHash fingerprint) | **≥ 95%** | 10 clusters × 5 variants |
-| **WASM binary size** | **50 KB** | brotli-compressed: 38 KB |
-| **JS wrapper size** | **17 KB** | ESM, tree-shakeable |
-| **Runtime dependencies** | **0** | pure WASM + thin JS glue |
-
-> **Recall@5 = 100%** on real sentence embeddings was measured by embedding 20 topic-diverse paragraphs with `all-MiniLM-L6-v2` (384-dim), quantising to 1-bit, building the HNSW index, and querying with the first 50 chars of each paragraph. Every correct document appeared in the top-5 results.
+| Search latency (10k vectors) | **0.08 ms** | HNSW, ef=64 |
+| Search latency (50k vectors) | **0.31 ms** | HNSW, ef=64 |
+| Batch insert | **0.5 µs / vector** | single WASM call |
+| Index build (10k vectors) | **~180 ms** | M=16, ef_construction=200 |
+| RAM per vector (384-dim) | **48 B** | vs 1,536 B for f32 |
+| RAM — 1M vectors | **48 MB** | vs 1.5 GB for f32 |
+| Recall@5 (sentence embeddings) | **100%** | all-MiniLM-L6-v2, 20-doc corpus |
+| Recall@5 (visual pHash) | **≥ 95%** | 10 clusters × 5 variants |
+| WASM binary size | **50 KB** | brotli: 38 KB |
+| Runtime dependencies | **0** | pure WASM + thin JS glue |
 
 ---
 
-## How we achieved these numbers
+## Quick-starts
 
-### 1. 1-bit quantisation — 32× RAM, almost no recall loss
+### Vercel AI SDK (agent scratchpad)
+
+```ts
+import { openai } from '@ai-sdk/openai';
+import { streamText } from 'ai';
+import { VercelMiniVecDb } from '@microvecdb/core/vercel';
+
+// Create a per-request ephemeral memory — 10 min TTL, GC every 30 s
+const memory = await VercelMiniVecDb.create(
+  openai.embedding('text-embedding-3-small'),
+  { ttlMinutes: 10, gcIntervalMs: 30_000 },
+);
+
+// Store agent observations
+await memory.add([
+  'User mentioned their order number is 42-ABC.',
+  'User is on the returns flow, step 2 of 4.',
+]);
+
+// Plug directly into streamText — the LLM calls it autonomously
+const result = await streamText({
+  model: openai('gpt-4o-mini'),
+  tools: { searchMemory: memory.createRetrievalTool() },
+  messages,
+});
+
+// Clean up when the request is done
+memory.destroy();
+```
+
+### LangChain Python (agent scratchpad)
+
+```python
+from langchain_openai import OpenAIEmbeddings
+from minivecdb.langchain import LangChainMiniVecDb
+
+# 10-minute TTL, GC daemon fires every 30 s
+memory = LangChainMiniVecDb(
+    embedding=OpenAIEmbeddings(model="text-embedding-3-small"),
+    ttl_minutes=10,
+    gc_interval_sec=30,
+)
+
+memory.add_texts([
+    "User mentioned ticket #42-ABC.",
+    "User has already tried resetting their password.",
+])
+
+results = memory.similarity_search("what is the user's issue?", k=3)
+
+# Use as a context manager for automatic cleanup
+with LangChainMiniVecDb(embedding=..., ttl_minutes=5) as mem:
+    mem.add_texts(["observation"])
+    docs = mem.similarity_search("query")
+# GC thread stopped automatically on exit
+```
+
+### LangChain JS
+
+```ts
+import { OpenAIEmbeddings } from '@langchain/openai';
+import { LangChainMiniVecDb } from '@microvecdb/core';
+
+const store = await LangChainMiniVecDb.fromTexts(
+  ['Paris is the capital of France.', 'Berlin is the capital of Germany.'],
+  [{ source: 'wiki' }, { source: 'wiki' }],
+  new OpenAIEmbeddings({ modelName: 'text-embedding-3-small' }),
+);
+
+const results = await store.similaritySearch('European capitals', 3);
+```
+
+### Raw WASM API (browser / Node.js)
+
+```ts
+import { MicroVecDB } from '@microvecdb/core';
+
+const db = await MicroVecDB.init({ capacity: 10_000 });
+db.insert({ id: 1, vector: new Float32Array(384) });
+db.buildIndex();
+
+const results = db.search(queryVec, { limit: 5 });
+// → [{ id: 1, score: 0.94 }, …]
+```
+
+### Raw Python API
+
+```python
+from minivecdb import MiniVecDb
+import numpy as np
+
+db = MiniVecDb(capacity=10_000)
+vec = np.random.randn(384).astype(np.float32)
+vec /= np.linalg.norm(vec)
+
+db.insert(id=0, vector=vec.tolist(), inserted_at=0.0)
+db.build_index(m=16, ef_construction=200)
+
+results = db.search(vec.tolist(), limit=5)
+# → [{"id": 0, "score": 1.0, "distance": 0}, …]
+```
+
+---
+
+## TTL & garbage collection
+
+Every high-level adapter supports TTL-based auto-expiry.
+
+### How it works
+
+1. Each inserted text gets a wall-clock timestamp at insert time.
+2. A background GC loop fires every `gcIntervalMs` / `gc_interval_sec`.
+3. GC tombstones vectors older than `ttlMinutes` / `ttl_minutes` in the Rust layer (zero-copy soft-delete) and evicts them from the JS/Python doc map.
+4. Tombstoned slots are invisible to `search()` and are physically reclaimed on `compact()`.
+
+Setting `ttlMinutes: 0` (default) disables GC entirely — no timer is created.
+
+### Manual GC
+
+```ts
+// TypeScript
+const count = memory.runGc();  // returns tombstone count
+
+// Python
+count = memory.run_gc()
+```
+
+---
+
+## How it achieves these numbers
+
+### 1-bit quantisation — 32× RAM, near-zero recall loss
 
 Every `Float32Array(384)` is compressed to 12 × `u32` (384 bits = 48 bytes):
 
 ```
-f32[384] → sign(x - μ) → bit[384] → u32[12]
+f32[384]  →  sign(x − μ)  →  bit[384]  →  u32[12]
 ```
 
-The sign bit captures which side of the median each dimension falls on. For L2-normalised embeddings (unit hypersphere), this preserves the rank order of nearest neighbours with very high fidelity — semantically close vectors share the vast majority of their sign bits.
+The sign bit captures which side of the per-dimension median each value falls on. For L2-normalised sentence embeddings this preserves nearest-neighbour rank order with very high fidelity — semantically close vectors share ≥ 85% of their sign bits.
 
-**Why it works:** sentence embeddings from models like `all-MiniLM-L6-v2` are not uniformly distributed. Each semantic concept activates a consistent subset of dimensions. After normalisation, vectors for "quantum computing" and "machine learning" land in different regions of the hypersphere, so their sign-bit patterns differ in ~150–200 positions out of 384. Vectors for "quantum computing" and "qubit entanglement" differ in only ~10–30 positions. This 5–15× separation ratio is large enough for HNSW to navigate reliably.
-
-### 2. Hamming distance — ~10× faster than cosine
-
-Once quantised, similarity is computed as:
+### Hamming distance — ~10× faster than cosine
 
 ```rust
 fn hamming(a: &[u32; 12], b: &[u32; 12]) -> u32 {
@@ -72,210 +203,117 @@ fn hamming(a: &[u32; 12], b: &[u32; 12]) -> u32 {
 }
 ```
 
-`XOR + count_ones` maps to a single CPU instruction (`POPCNT`) on every modern chip. Comparing two 384-bit vectors takes ~12 POPCNT operations. On the same hardware, comparing two `f32[384]` vectors with dot product takes 384 multiplications + 383 additions. Hamming wins by roughly 10–15×.
+`XOR + POPCNT` maps to a single CPU instruction on every modern chip. Comparing two 384-bit vectors takes ~12 POPCNT operations vs. 384 multiplications for dot product.
 
-### 3. HNSW — O(log n) approximate nearest neighbour
+### HNSW — O(log n) approximate nearest neighbour
 
-HNSW (Hierarchical Navigable Small World) builds a multi-layer graph:
+Multi-layer graph: Layer 0 has all vectors connected to their M=16 closest neighbours; each higher layer is a ~37% random subset. Search descends from the sparse top layer to the dense bottom layer in O(log n) hops.
 
-- **Layer 0**: all vectors, connected to their `M=16` closest neighbours
-- **Layer k**: a random ~37% subset of layer k-1 (geometric distribution)
+Parameters: `M=16`, `ef_construction=200`, `ef_search=64`.
 
-Search starts at the top layer (few nodes, long-range edges) and greedily descends to layer 0 (many nodes, short-range edges). This gives O(log n) average complexity.
+### Rust → WASM → browser
 
-Parameters used:
-- `M = 16` — edges per node at layer 0
-- `ef_construction = 200` — candidate list size during index build (higher = better recall, slower build)
-- `ef_search = 64` — candidate list size during search (tunable at query time)
+- **`lol_alloc`**: minimal WASM allocator, avoids 30 KB overhead of `wee_alloc`
+- **`wasm-bindgen`**: zero-copy transfer of `Float32Array` from JS to WASM
+- **Flat arena storage**: `Vec<[u32;12]>` — cache-friendly, no pointer chasing
+- **OPFS persistence**: `FileSystemSyncAccessHandle` — ~500 MB/s, no server needed
 
-The combination of **HNSW navigation + Hamming distance** means each hop in the graph costs ~12 instructions instead of ~767. On a 10k-vector index, search visits ~80 candidates on average and finishes in 0.08 ms.
+### PyO3 native extension
 
-### 4. Rust → WASM → browser
-
-The core data structures (flat arena storage, HNSW graph) are written in Rust and compiled to WASM with `wasm-pack`. Key choices:
-
-- **`lol_alloc`**: a minimal allocator for WASM that avoids the 30KB overhead of the default `wee_alloc`
-- **`#[inline(always)]`** on hot paths: ensures the Hamming distance function gets inlined by the WASM JIT
-- **Flat arena storage**: all vectors stored as a contiguous `Vec<[u32;12]>` — cache-friendly, no pointer chasing
-- **`wasm-bindgen`**: zero-copy transfer of `Float32Array` from JS to WASM (no serialisation)
-
-### 5. OPFS persistence — instant reload, no server
-
-The serialised index is written to the browser's [Origin Private File System](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) using the `FileSystemSyncAccessHandle` API. This gives file-system-level I/O speed (~500 MB/s) without leaving the browser sandbox. On page reload, the 48 MB index for 1M vectors loads in ~100 ms.
-
----
-
-## Quickstart
-
-```ts
-import { MicroVecDB } from '@microvecdb/core';
-
-// 1. Create a database
-const db = await MicroVecDB.init({ capacity: 10_000 });
-
-// 2. Insert vectors (Float32Array of length 384)
-db.insert({ id: 1, vector: embedding });
-
-// Bulk insert — faster, single WASM call
-db.insertBatch([
-  { id: 2, vector: vec2 },
-  { id: 3, vector: vec3 },
-]);
-
-// 3. Build the HNSW index (call once after bulk inserts)
-db.buildIndex();
-
-// 4. Search — returns top-k results sorted by similarity
-const results = db.search(queryEmbedding, { limit: 5 });
-// → [{ id: 1, score: 0.94 }, { id: 3, score: 0.87 }, …]
-```
+The Python package is a Rust native extension (`.so` / `.pyd`) built with Maturin. The same `microvecdb-core` Rust library powers both the WASM and Python builds — no code duplication.
 
 ---
 
 ## Full API
 
-### `MicroVecDB.init(options?)`
+### TypeScript / WASM
 
+#### `MicroVecDB.init(options?)`
 ```ts
 const db = await MicroVecDB.init({
   capacity: 10_000,          // pre-allocate slots; grows automatically (default: 1024)
-  persistenceKey: 'my-app',  // OPFS key for persistence; null = ephemeral (default: null)
+  persistenceKey: 'my-app',  // OPFS key; null = ephemeral (default: null)
   m: 16,                     // HNSW edges per node (default: 16)
   efConstruction: 200,       // HNSW build quality (default: 200)
 });
 ```
 
-### `db.insert({ id, vector })`
-
+#### `db.insert({ id, vector })` / `db.insertBatch(items)`
 ```ts
 db.insert({ id: 42, vector: new Float32Array(384) });
+// Bulk insert — 5–10× faster, single WASM call:
+db.insertBatch([{ id: 0, vector: v0 }, { id: 1, vector: v1 }]);
 ```
 
-- `id`: non-negative integer (up to 2^31 - 1)
-- `vector`: `Float32Array` of exactly 384 elements, all finite
-
-### `db.insertBatch(items)`
-
+#### `db.search(queryVec, { limit?, ef? })`
 ```ts
-db.insertBatch([
-  { id: 0, vector: v0 },
-  { id: 1, vector: v1 },
-]);
+const results = db.search(queryVec, { limit: 5, ef: 64 });
+// → Array<{ id: number, score: number }>  — score ∈ [0, 1]
 ```
 
-Single WASM call — 5–10× faster than calling `insert()` in a loop.
+#### `db.delete(id)` / `db.compact()` / `db.stats()` / `db.dispose()`
 
-### `db.buildIndex()`
-
-Builds the HNSW graph. Must be called once after bulk inserts. Subsequent `insert()` calls after `buildIndex()` are inserted into the graph incrementally.
-
-### `db.search(queryVector, options?)`
-
-```ts
-const results = db.search(queryVec, {
-  limit: 5,   // number of results (default: 10)
-  ef: 64,     // HNSW search quality; higher = better recall, slower (default: 64)
-});
-// → Array<{ id: number, score: number }>
-// score ∈ [0, 1] — 1 means identical vector
-```
-
-### `db.delete(id)`
-
-```ts
-const deleted = db.delete(42); // → true if found
-```
-
-Marks the slot as deleted. Deleted slots are excluded from search results. Compact after many deletions with `db.compact()`.
-
-### `db.save()` / `db.load()`
-
-```ts
-await db.save();   // writes serialised index to OPFS (requires persistenceKey)
-await db.load();   // restores from OPFS
-```
-
-### `db.stats()`
-
-```ts
-const { size, indexBuilt, capacityUsed } = db.stats();
-```
-
-### `db.dispose()`
-
-```ts
-db.dispose(); // frees WASM memory — call when done
-```
-
----
-
-### SharedMicroVecDB — non-blocking via Web Worker
-
-Runs the database in a SharedWorker so inserts and searches don't block the main thread:
-
+#### `SharedMicroVecDB` — non-blocking via Web Worker
 ```ts
 import { SharedMicroVecDB } from '@microvecdb/core/worker';
-
 const db = await SharedMicroVecDB.init({ capacity: 100_000 });
 await db.insertBatch(items);
-await db.buildIndex();
 const results = await db.search(queryVec, { limit: 5 });
 ```
 
-Same API as `MicroVecDB`, all methods return `Promise`.
+### Python
+
+#### `MiniVecDb(capacity?)`
+```python
+from minivecdb import MiniVecDb
+
+db = MiniVecDb(capacity=10_000)
+db.insert(id=0, vector=[0.1] * 384, inserted_at=time.time() * 1000)
+db.build_index(m=16, ef_construction=200)
+results = db.search([0.1] * 384, limit=5)
+# → [{"id": 0, "score": 1.0, "distance": 0}]
+
+tombstoned = db.run_gc(ttl_ms=60_000)  # manual GC
+data = db.serialize()                   # bytes — use with deserialize()
+```
+
+#### `LangChainMiniVecDb`
+```python
+from minivecdb.langchain import LangChainMiniVecDb
+
+store = LangChainMiniVecDb(
+    embedding=embeddings,
+    capacity=50_000,
+    ttl_minutes=10,       # 0 = immortal
+    gc_interval_sec=30,
+)
+
+ids = store.add_texts(["text1", "text2"], metadatas=[{"k": "v"}, {}])
+docs = store.similarity_search("query", k=4)
+docs_scores = store.similarity_search_with_score("query", k=4)
+# → [(Document, score), …]
+
+store.delete(ids=["0", "1"])
+store.build_index()
+store.destroy()           # stop GC thread, free memory
+```
 
 ---
 
-## Use cases
+## Setup guides
 
-### 1. Local RAG — semantic search over documents
-
-Embed a PDF with `@xenova/transformers` (`all-MiniLM-L6-v2`, 384-dim), store chunks in MicroVecDB, search with natural language. No API key. No server. Works offline.
-
-→ See [`examples/pdf-brain`](examples/pdf-brain)
-
-### 2. Visual similarity search
-
-Extract a perceptual fingerprint from images with the Canvas API (zero ML), store in MicroVecDB, click any image to find visually similar ones. 500+ images indexed in < 200ms.
-
-→ See [`examples/visual-search`](examples/visual-search)
-
-### 3. Privacy-first note search
-
-Index the user's notes locally. Search by meaning, not keywords. Notes never leave the device. Combine with `window.ai` (Chrome) or `@xenova/transformers` for fully local embeddings.
-
-### 4. Offline-capable apps
-
-Persist the index to OPFS with `persistenceKey`. The index survives page reloads and works without network. Ideal for PWAs.
-
-### 5. Edge / browser extensions
-
-At 50 KB, MicroVecDB fits in a browser extension without inflating the bundle. Use it for semantic deduplication, smart bookmarks, or local recommendation systems.
-
-### 6. E-commerce visual search
-
-Let users upload a photo and find similar products. No ML model needed — the perceptual fingerprint approach works for colour/shape matching in < 1ms.
-
----
-
-## Vite setup
-
-Add to `vite.config.ts`:
+### Vite
 
 ```ts
+// vite.config.ts
 export default defineConfig({
-  optimizeDeps: {
-    exclude: ['@microvecdb/core'],  // prevents esbuild from mangling import.meta.url
-  },
+  optimizeDeps: { exclude: ['@microvecdb/core'] },
   assetsInclude: ['**/*.wasm'],
-  server: {
-    fs: { allow: ['../..'] },       // needed in monorepos
-  },
+  server: { fs: { allow: ['../..'] } },
 });
 ```
 
-For OPFS persistence and SharedWorker mode, add COOP/COEP headers:
-
+For OPFS / SharedWorker mode, add COOP/COEP headers:
 ```ts
 server: {
   headers: {
@@ -285,59 +323,100 @@ server: {
 },
 ```
 
----
+### Next.js / Edge Runtime
 
-## Security model
-
-| Layer | Mechanism | Why |
-|---|---|---|
-| Runtime privacy | JS `#` private fields | Prevents external code from reading internal WASM pointers |
-| Input validation | `assertValidVector`, `assertValidId` | Rejects NaN, Infinity, wrong length before they reach WASM |
-| Cross-origin isolation | COOP + COEP headers | Required for `SharedArrayBuffer` (multi-threaded WASM mode) |
-| Supply chain | SRI hashes in `dist/sri-hashes.json` | Verify build artefacts with `npm run generate-sri` |
-
----
-
-## Running the examples
-
-From the repo root:
-
-```bash
-npm install
-
-# PDF Brain — semantic search over PDFs
-npm run dev --workspace=examples/pdf-brain
-# → http://localhost:5173
-
-# Visual Matcher — instant image similarity
-npm run dev --workspace=examples/visual-search
-# → http://localhost:5174
-```
+The `@microvecdb/core/vercel` sub-path is tree-shaken: it imports `ai` and `zod` only when used, keeping the main bundle at 0 extra dependencies.
 
 ---
 
 ## Development
 
+### TypeScript / WASM
+
 ```bash
-# Build WASM + TypeScript
+git clone https://github.com/Alekkk777/MiniVecDb.git
+cd MiniVecDb
+npm install
+
+# Build WASM binary + TypeScript wrapper
 npm run build --workspace=packages/core
 
-# Build + generate SRI hashes
+# Build + regenerate SRI hashes
 npm run build:full --workspace=packages/core
 
-# Tests
+# Tests (vitest)
 npm test --workspaces --if-present
 
-# Publish to npm
-npm run release --workspace=packages/core  # runs build:full then npm publish
+# Watch mode
+npm run test:watch --workspace=packages/core
 ```
 
-Requires: `rustup`, `wasm-pack`, Node.js 18+.
+Requires: `rustup`, `wasm-pack`, Node.js ≥ 18.
 
 ```bash
 rustup target add wasm32-unknown-unknown
 cargo install wasm-pack
 ```
+
+### Python native extension
+
+```bash
+cd crates/microvecdb-python
+pip install maturin
+
+# Development build (editable install)
+maturin develop --release
+
+# Run tests
+pip install pytest freezegun langchain-core
+pytest tests/ -v
+
+# Build a wheel
+maturin build --release
+```
+
+### Examples
+
+```bash
+npm run dev --workspace=examples/pdf-brain     # → http://localhost:5173
+npm run dev --workspace=examples/visual-search  # → http://localhost:5174
+```
+
+---
+
+## Project structure
+
+```
+crates/
+  microvecdb-core/        Rust library (quantisation, storage, HNSW, time)
+  microvecdb-wasm/        wasm-bindgen bindings → browser / Node.js
+  microvecdb-python/      PyO3 native extension → minivecdb PyPI package
+    python/minivecdb/
+      __init__.py         re-exports MiniVecDb from _minivecdb.so
+      langchain.py        LangChain VectorStore adapter with TTL GC
+    tests/                pytest suite (38 unit + 5 integration)
+packages/
+  core/                   @microvecdb/core npm package
+    src/
+      MicroVecDB.ts       WASM wrapper
+      SharedMicroVecDB.ts Web Worker proxy
+      langchain.ts        LangChain JS adapter
+      vercel.ts           Vercel AI SDK adapter with TTL GC
+examples/
+  pdf-brain/              Local RAG demo (React + Transformers.js)
+  visual-search/          Image similarity demo (React + pHash)
+```
+
+---
+
+## Security
+
+| Layer | Mechanism |
+|---|---|
+| Runtime privacy | JS `#` private fields — no external access to WASM pointers |
+| Input validation | `assertValidVector`, `assertValidId` — rejects NaN/Infinity before WASM |
+| Cross-origin isolation | COOP + COEP headers for SharedArrayBuffer mode |
+| Supply chain | SRI hashes in `dist/sri-hashes.json` — verify with `npm run generate-sri` |
 
 ---
 

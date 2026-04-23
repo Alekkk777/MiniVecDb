@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/microvecdb-core",
     "crates/microvecdb-wasm",
+    "crates/microvecdb-python",
 ]
 
 [profile.release]

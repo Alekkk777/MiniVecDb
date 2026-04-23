@@ -1,0 +1,45 @@
+[build-system]
+requires      = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name            = "minivecdb"
+version         = "1.0.0"
+description     = "Ultra-fast 1-bit quantised vector database with TTL GC — Rust native extension"
+requires-python = ">=3.9"
+license         = { text = "MIT" }
+readme          = "README.md"
+keywords        = ["vector-database", "embeddings", "hnsw", "rag", "rust", "langchain", "llm"]
+authors         = [{ name = "Alessandro Saladino" }]
+classifiers     = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Database",
+]
+
+[project.urls]
+Homepage   = "https://github.com/Alekkk777/MiniVecDb"
+Repository = "https://github.com/Alekkk777/MiniVecDb"
+Issues     = "https://github.com/Alekkk777/MiniVecDb/issues"
+
+[project.optional-dependencies]
+langchain = ["langchain-core>=0.3"]
+dev       = ["langchain-core>=0.3", "pytest>=8", "freezegun>=1.4"]
+
+[tool.pytest.ini_options]
+testpaths   = ["tests"]
+addopts     = "-v --tb=short"
+markers     = ["integration: full-stack tests requiring the native Rust extension"]
+
+[tool.maturin]
+module-name   = "minivecdb._minivecdb"
+python-source = "python"
+features      = ["pyo3/extension-module"]

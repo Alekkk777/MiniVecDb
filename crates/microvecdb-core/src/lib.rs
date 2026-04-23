@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(target_arch = "wasm32", no_std)]
 
 extern crate alloc;
 
@@ -9,6 +9,7 @@ pub mod error;
 pub mod hnsw;
 pub mod quantize;
 pub mod storage;
+pub mod time;
 
 pub use distance::hamming_distance;
 pub use error::DbError;

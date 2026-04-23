@@ -248,6 +248,21 @@ export class MicroVecDB {
     return { count: this.count, hasIndex: this.hasIndex };
   }
 
+  // ----- TTL / GC ----------------------------------------------------------
+
+  /**
+   * Tombstone every active vector whose age exceeds `ttlMs` milliseconds.
+   *
+   * The timestamp is read from `Date.now()` inside the WASM engine; no
+   * argument is needed from the caller.  Tombstoned vectors are excluded
+   * from all subsequent searches without requiring a rebuild.
+   *
+   * @returns Number of vectors tombstoned.
+   */
+  runGc(ttlMs: number): number {
+    return this.#inner.run_gc(ttlMs);
+  }
+
   // ----- Lifecycle ---------------------------------------------------------
 
   /**
