@@ -9,9 +9,9 @@ permissions:
   id-token: write  # required for OIDC Trusted Publisher
 
 jobs:
-  # ── Build wheels for each platform ──────────────────────────────────────
+  # ── Build abi3 wheels (one per platform, works with Python 3.9+) ─────────
   build-wheels:
-    name: Build wheels — ${{ matrix.os }}
+    name: Build wheel — ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -20,22 +20,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build wheels
+      - name: Build abi3 wheel
         uses: PyO3/maturin-action@v1
         with:
           working-directory: crates/microvecdb-python
           command: build
           args: --release --out dist
-          # manylinux for broad Linux compatibility
+          # abi3 feature is set in Cargo.toml (pyo3/abi3-py39).
+          # manylinux=auto gives broad Linux compatibility via musllinux fallback.
           manylinux: auto
 
-      - name: Upload wheels
+      - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}
           path: crates/microvecdb-python/dist
 
-  # ── Build pure-Python sdist ──────────────────────────────────────────────
+  # ── Build source distribution ────────────────────────────────────────────
   build-sdist:
     name: Build source distribution
     runs-on: ubuntu-latest
@@ -61,7 +62,7 @@ jobs:
     name: Publish to PyPI
     runs-on: ubuntu-latest
     needs: [build-wheels, build-sdist]
-    environment: pypi  # configure Trusted Publisher in PyPI project settings
+    environment: pypi
 
     steps:
       - name: Download all artifacts
@@ -72,4 +73,3 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        # No token needed — OIDC Trusted Publisher authenticates via id-token
