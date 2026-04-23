@@ -52,13 +52,18 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
 
-      - name: Build WASM
-        run: wasm-pack build crates/microvecdb-wasm --target web --out-dir pkg
+      - name: Install Node.js dependencies
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
 
-      - name: Build TypeScript wrapper
-        run: |
-          npm ci
-          npm run build:ts --workspace=packages/core
+      - run: npm ci
+
+      # Use the npm script so wasm-pack outputs to {repo-root}/pkg/ (the path
+      # the TypeScript wasm-loader.ts expects: '../../../pkg/microvecdb_wasm.js').
+      - name: Build WASM + TypeScript
+        run: npm run build --workspace=packages/core
 
       - name: Verify dist/ artefacts exist
         run: |

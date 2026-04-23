@@ -176,10 +176,7 @@ describe('VercelMiniVecDb', () => {
         embeddings: [Array<number>(512).fill(0.5)],
         values: ['x'],
         usage: { tokens: 1 },
-        warnings: undefined as never,
-        responses: undefined as never,
-        providerMetadata: undefined as never,
-        experimental_providerMetadata: undefined as never,
+        warnings: [],
       });
 
       store = await makeStore();
@@ -192,10 +189,7 @@ describe('VercelMiniVecDb', () => {
         embedding: Array<number>(128).fill(0.5),
         value: 'q',
         usage: { tokens: 1 },
-        warnings: undefined as never,
-        responses: undefined as never,
-        providerMetadata: undefined as never,
-        experimental_providerMetadata: undefined as never,
+        warnings: [],
       });
 
       store = await makeStore();
@@ -232,7 +226,7 @@ describe('VercelMiniVecDb', () => {
       await store.add(['Paris is in France.', 'Berlin is in Germany.']);
 
       const t = store.createRetrievalTool();
-      const output = await t.execute({ query: 'European capitals' }, {} as never);
+      const output = await t.execute!({ query: 'European capitals' }, {} as never);
 
       expect(typeof output).toBe('string');
       expect(output).toContain('[1]');
@@ -242,7 +236,7 @@ describe('VercelMiniVecDb', () => {
     it('execute() returns "no context" message when store is empty', async () => {
       store = await makeStore();
       const t = store.createRetrievalTool();
-      const output = await t.execute({ query: 'anything' }, {} as never);
+      const output = await t.execute!({ query: 'anything' }, {} as never);
       expect(output).toContain('No relevant context');
     });
 
@@ -260,7 +254,7 @@ describe('VercelMiniVecDb', () => {
       vi.advanceTimersByTime(70_000);
 
       const t = store.createRetrievalTool();
-      const output = await t.execute({ query: 'ephemeral' }, {} as never);
+      const output = await t.execute!({ query: 'ephemeral' }, {} as never);
       expect(output).toContain('No relevant context');
     });
   });
