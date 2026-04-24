@@ -1,18 +1,24 @@
 /**
- * WASM loading with three strategies:
- *   1. Bundler (Vite/webpack): ESM import inlines the .wasm as a URL/base64
- *   2. Browser fetch: streaming instantiation from a URL
- *   3. Node.js: fs.readFileSync fallback (for tests / CLI tooling)
+ * WASM loading with two strategies:
+ *   1. Browser / Edge: `new URL('./microvecdb_wasm_bg.wasm', import.meta.url)`
+ *      → the bundler (Vite/webpack) or the ESM host resolves the URL, and
+ *      wasm-bindgen uses WebAssembly.instantiateStreaming internally.
+ *   2. Node.js (file:// URL): `fetch` does not support file:// URLs in Node.
+ *      We read the binary directly with `fs.readFileSync` and pass the Buffer
+ *      as a BufferSource to the wasm-bindgen init function.
  *
  * The compiled `WebAssembly.Module` is cached so that multiple `MicroVecDB.init()`
- * calls within the same page share the same compiled module.
+ * calls within the same page / process share the same compiled module.
+ *
+ * PACKAGING NOTE
+ * The `.wasm` binary is copied into `dist/` by `postbuild:ts` so that it is
+ * included in the npm package alongside the JS bundles.  The path below is
+ * therefore always `./microvecdb_wasm_bg.wasm` relative to the chunk file.
  */
 
-// We import the wasm-pack generated JS glue.  The glue exports an `init`
-// function that handles instantiation and an `initSync` for synchronous use.
-// The path is relative to the dist/ output, which sits next to pkg/.
+// We import the wasm-pack generated JS glue.
 type WasmGlue = {
-  default: (input?: RequestInfo | URL | BufferSource | WebAssembly.Module) => Promise<unknown>;
+  default: (input?: RequestInfo | URL | BufferSource | WebAssembly.Module | { module_or_path: RequestInfo | URL | BufferSource | WebAssembly.Module }) => Promise<unknown>;
   WasmVecDb: WasmVecDbConstructor;
 };
 
@@ -30,11 +36,6 @@ export type WasmVecDbInstance = {
   build_index(m: number, ef_construction: number): void;
   delete(doc_id: number): boolean;
   compact(): number;
-  /**
-   * Tombstone every active vector whose age exceeds `ttl_ms` milliseconds.
-   * Uses `Date.now()` internally. Returns the count of newly tombstoned nodes.
-   * Added in Phase 1 (TTL/GC support). Requires a WASM rebuild after Phase 1.
-   */
   run_gc(ttl_ms: number): number;
   serialize(): Uint8Array;
   raw_vecs_ptr(): number;
@@ -47,20 +48,25 @@ export type WasmVecDbInstance = {
 
 let cachedGlue: WasmGlue | null = null;
 
-/**
- * Load and initialise the WASM module.  Safe to call multiple times; subsequent
- * calls return the cached result without re-compiling.
- */
 export async function loadWasm(): Promise<WasmGlue> {
   if (cachedGlue) return cachedGlue;
 
-  // Dynamic import works in both browser (Vite inlines the URL) and Node.js.
-  // Adjust the relative path as needed for your bundler setup.
+  // The JS glue is bundled by tsup into the same dist/ chunk.
   const glue = await import('../../../pkg/microvecdb_wasm.js') as WasmGlue;
 
-  // Pass the .wasm URL explicitly so bundlers (Vite, webpack) can locate the
-  // binary even when the JS and .wasm files live in different directories.
-  await glue.default(new URL('../../../pkg/microvecdb_wasm_bg.wasm', import.meta.url));
+  // The .wasm binary lives next to the bundled chunk in dist/.
+  const wasmUrl = new URL('./microvecdb_wasm_bg.wasm', import.meta.url);
+
+  let wasmInput: RequestInfo | URL | BufferSource | WebAssembly.Module = wasmUrl;
+
+  if (wasmUrl.protocol === 'file:') {
+    // Node.js: fetch() does not support file:// — read bytes directly.
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    wasmInput = readFileSync(fileURLToPath(wasmUrl));
+  }
+
+  await glue.default({ module_or_path: wasmInput });
 
   cachedGlue = glue;
   return glue;
