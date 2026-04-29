@@ -4,6 +4,8 @@ export { LangChainMiniVecDb } from './langchain.js';
 export type { MiniVecDbConfig } from './langchain.js';
 export { VercelMiniVecDb } from './vercel.js';
 export type { VercelMiniVecDbConfig, RetrievalResult } from './vercel.js';
+export { SemanticCache, withSemanticCache } from './cache.js';
+export type { SemanticCacheOptions } from './cache.js';
 export type {
   DbOptions,
   InsertOptions,
